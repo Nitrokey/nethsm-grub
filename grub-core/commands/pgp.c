@@ -683,19 +683,12 @@ grub_pubkey_close (void *ctxt)
 }
 
 grub_err_t
-grub_verify_signature (grub_file_t f, const char *fsig,
+grub_verify_signature2 (grub_file_t f, grub_file_t sig,
 		       struct grub_public_key *pkey)
 {
-  grub_file_t sig;
   grub_err_t err;
   struct grub_pubkey_context ctxt;
   grub_uint8_t *readbuf = NULL;
-
-  sig = grub_file_open (fsig,
-			GRUB_FILE_TYPE_SIGNATURE
-			| GRUB_FILE_TYPE_NO_DECOMPRESS);
-  if (!sig)
-    return grub_errno;
 
   err = grub_verify_signature_init (&ctxt, sig);
   if (err)
@@ -725,6 +718,21 @@ grub_verify_signature (grub_file_t f, const char *fsig,
  fail:
   grub_pubkey_close_real (&ctxt);
   return grub_errno;
+}
+
+grub_err_t
+grub_verify_signature (grub_file_t f, const char *fsig,
+		       struct grub_public_key *pkey)
+{
+  grub_file_t sig;
+
+  sig = grub_file_open (fsig,
+			GRUB_FILE_TYPE_SIGNATURE
+			| GRUB_FILE_TYPE_NO_DECOMPRESS);
+  if (!sig)
+    return grub_errno;
+
+  return grub_verify_signature2 (f, sig, pkey);
 }
 
 static grub_err_t
