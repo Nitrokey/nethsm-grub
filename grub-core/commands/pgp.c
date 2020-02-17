@@ -888,6 +888,16 @@ grub_pubkey_init (grub_file_t io, enum grub_file_type type __attribute__ ((unuse
       return GRUB_ERR_NONE;
     }
 
+  switch (type & GRUB_FILE_TYPE_MASK)
+    {
+    case GRUB_FILE_TYPE_SBS:
+      /* skip files with embedded signatures */
+      *flags = GRUB_VERIFY_FLAGS_SKIP_VERIFICATION;
+      return GRUB_ERR_NONE;
+    default:
+      break;
+    }
+
   fsuf = grub_malloc (grub_strlen (io->name) + sizeof (".sig"));
   if (!fsuf)
     return grub_errno;
