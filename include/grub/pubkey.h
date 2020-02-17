@@ -28,6 +28,9 @@ grub_err_t
 grub_verify_signature (grub_file_t f, const char *fsig,
 		       struct grub_public_key *pk);
 
+grub_err_t
+grub_verify_signature2 (grub_file_t f, grub_file_t sig,
+		       struct grub_public_key *pk);
 
 struct grub_public_subkey *
 grub_crypto_pk_locate_subkey (grub_uint64_t keyid, struct grub_public_key *pkey);
