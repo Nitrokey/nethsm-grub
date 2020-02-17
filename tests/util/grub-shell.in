@@ -201,6 +201,7 @@ esac
 
 timeout=60
 mkimage_extra_arg=
+mkrescue_args=()
 
 # Check the arguments.
 for option in "$@"; do
@@ -224,7 +225,9 @@ for option in "$@"; do
 	files="$files $fls" ;;
     --mkrescue-arg=*)
 	mkr=`echo "$option" | sed -e 's/--mkrescue-arg=//' -e 's/,/ /g'`
-	mkrescue_args="$mkrescue_args $mkr" ;;
+	mkrescue_args+=("$(cut -d= -f1 <<< $mkr)")
+	mkrescue_args+=("$(cut -d= -f2 <<< $mkr)")
+	;;
     --qemu=*)
 	qemu=`echo "$option" | sed -e 's/--qemu=//' -e 's/,/ /g'`;;
     --pseries)
@@ -383,7 +386,7 @@ if [ x$boot != xnet ] && [ x$boot != xemu ]; then
 	--rom-directory="${rom_directory}" \
 	--locale-directory="@srcdir@/po" \
 	--themes-directory="@srcdir@/themes" \
-	$mkimage_extra_arg ${mkrescue_args} \
+	$mkimage_extra_arg "${mkrescue_args[@]}" \
 	"/boot/grub/grub.cfg=${cfgfile}" "/boot/grub/testcase.cfg=${source}" \
 	${files} >/dev/null 2>&1
 fi
@@ -477,7 +480,7 @@ copy_extra_files() {
 
 if [ x$boot = xnet ]; then
     netdir=`mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX"` || exit 1
-    pkgdatadir="@builddir@" "@builddir@/grub-mknetdir" "--grub-mkimage=${builddir}/grub-mkimage" "--directory=${builddir}/grub-core" "--net-directory=$netdir" ${mkrescue_args} > /dev/null
+    pkgdatadir="@builddir@" "@builddir@/grub-mknetdir" "--grub-mkimage=${builddir}/grub-mkimage" "--directory=${builddir}/grub-core" "--net-directory=$netdir" "${mkrescue_args[@]}" > /dev/null
     cp "${cfgfile}" "$netdir/boot/grub/grub.cfg"
     cp "${source}" "$netdir/boot/grub/testcase.cfg"
     [ -z "$files" ] || copy_extra_files "$netdir" $files
