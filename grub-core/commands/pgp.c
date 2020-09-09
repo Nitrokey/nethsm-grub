@@ -736,38 +736,6 @@ grub_verify_signature (grub_file_t f, const char *fsig,
 }
 
 static grub_err_t
-grub_cmd_trust (grub_extcmd_context_t ctxt,
-		int argc, char **args)
-{
-  grub_file_t pkf;
-  struct grub_public_key *pk = NULL;
-
-  if (argc < 1)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("one argument expected"));
-
-  pkf = grub_file_open (args[0],
-			GRUB_FILE_TYPE_PUBLIC_KEY_TRUST
-			| GRUB_FILE_TYPE_NO_DECOMPRESS
-			| (ctxt->state[OPTION_SKIP_SIG].set
-			   ? GRUB_FILE_TYPE_SKIP_SIGNATURE
-			   : GRUB_FILE_TYPE_NONE));
-  if (!pkf)
-    return grub_errno;
-  pk = grub_load_public_key (pkf);
-  if (!pk)
-    {
-      grub_file_close (pkf);
-      return grub_errno;
-    }
-  grub_file_close (pkf);
-
-  pk->next = grub_pk_trusted;
-  grub_pk_trusted = pk;
-
-  return GRUB_ERR_NONE;
-}
-
-static grub_err_t
 grub_cmd_list (grub_command_t cmd  __attribute__ ((unused)),
 	       int argc __attribute__ ((unused)),
 	       char **args __attribute__ ((unused)))
@@ -786,38 +754,6 @@ grub_cmd_list (grub_command_t cmd  __attribute__ ((unused)),
       }
 
   return GRUB_ERR_NONE;
-}
-
-static grub_err_t
-grub_cmd_distrust (grub_command_t cmd  __attribute__ ((unused)),
-		   int argc, char **args)
-{
-  grub_uint32_t keyid, keyid_be;
-  struct grub_public_key **pkey;
-  struct grub_public_subkey *sk;
-
-  if (argc < 1)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("one argument expected"));
-  keyid = grub_strtoull (args[0], 0, 16);
-  if (grub_errno)
-    return grub_errno;
-  keyid_be = grub_cpu_to_be32 (keyid);
-
-  for (pkey = &grub_pk_trusted; *pkey; pkey = &((*pkey)->next))
-    {
-      struct grub_public_key *next;
-      for (sk = (*pkey)->subkeys; sk; sk = sk->next)
-	if (grub_memcmp (sk->fingerprint + 4, &keyid_be, 4) == 0)
-	  break;
-      if (!sk)
-	continue;
-      next = (*pkey)->next;
-      free_pk (*pkey);
-      *pkey = next;
-      return GRUB_ERR_NONE;
-    }
-  /* TRANSLATORS: %08x is 32-bit key id.  */
-  return grub_error (GRUB_ERR_BAD_SIGNATURE, N_("public key %08x not found"), keyid);
 }
 
 static grub_err_t
@@ -871,8 +807,6 @@ grub_cmd_verify_signature (grub_extcmd_context_t ctxt,
   return err;
 }
 
-static int sec = 0;
-
 static grub_err_t
 grub_pubkey_init (grub_file_t io, enum grub_file_type type __attribute__ ((unused)),
 		  void **context, enum grub_verify_flags *flags)
@@ -881,12 +815,6 @@ grub_pubkey_init (grub_file_t io, enum grub_file_type type __attribute__ ((unuse
   char *fsuf, *ptr;
   grub_err_t err;
   struct grub_pubkey_context *ctxt;
-
-  if (!sec)
-    {
-      *flags = GRUB_VERIFY_FLAGS_SKIP_VERIFICATION;
-      return GRUB_ERR_NONE;
-    }
 
   switch (type & GRUB_FILE_TYPE_MASK)
     {
@@ -932,14 +860,6 @@ grub_pubkey_fini (void *ctxt)
   return grub_verify_signature_real (ctxt, NULL);
 }
 
-static char *
-grub_env_write_sec (struct grub_env_var *var __attribute__ ((unused)),
-		    const char *val)
-{
-  sec = (*val == '1') || (*val == 'e');
-  return grub_strdup (sec ? "enforce" : "no");
-}
-
 static grub_ssize_t 
 pseudo_read (struct grub_file *file, char *buf, grub_size_t len)
 {
@@ -964,64 +884,33 @@ struct grub_file_verifier grub_pubkey_verifier =
     .close = grub_pubkey_close,
   };
 
-static grub_extcmd_t cmd, cmd_trust;
-static grub_command_t cmd_distrust, cmd_list;
+static grub_extcmd_t cmd;
+static grub_command_t cmd_list;
 
 GRUB_MOD_INIT(pgp)
 {
-  const char *val;
-  struct grub_module_header *header;
+  grub_pk_trusted = NULL;
+  grub_file_t pkf;
 
-  val = grub_env_get ("check_signatures");
-  if (val && (val[0] == '1' || val[0] == 'e'))
-    sec = 1;
-  else
-    sec = 0;
+  pkf = grub_file_open("(cbfsdisk)/etc/trusted.pub",
+      GRUB_FILE_TYPE_PUBLIC_KEY_TRUST
+      | GRUB_FILE_TYPE_NO_DECOMPRESS);
+  if (!pkf)
+    grub_fatal("No initial key found in CBFS, aborting\n");
 
-  grub_register_variable_hook ("check_signatures", 0, grub_env_write_sec);
-  grub_env_export ("check_signatures");
+  grub_pk_trusted = grub_load_public_key (pkf);
+  if (!grub_pk_trusted)
+    grub_fatal ("Error loading initial key: %s\n", grub_errmsg);
 
-  grub_pk_trusted = 0;
-  FOR_MODULES (header)
-  {
-    struct grub_file pseudo_file;
-    struct grub_public_key *pk = NULL;
-
-    grub_memset (&pseudo_file, 0, sizeof (pseudo_file));
-
-    /* Not an ELF module, skip.  */
-    if (header->type != OBJ_TYPE_PUBKEY)
-      continue;
-
-    pseudo_file.fs = &pseudo_fs;
-    pseudo_file.size = (header->size - sizeof (struct grub_module_header));
-    pseudo_file.data = (char *) header + sizeof (struct grub_module_header);
-
-    pk = grub_load_public_key (&pseudo_file);
-    if (!pk)
-      grub_fatal ("error loading initial key: %s\n", grub_errmsg);
-
-    pk->next = grub_pk_trusted;
-    grub_pk_trusted = pk;
-  }
-
-  if (!val)
-    grub_env_set ("check_signatures", grub_pk_trusted ? "enforce" : "no");
+  grub_file_close(pkf);
 
   cmd = grub_register_extcmd ("verify_detached", grub_cmd_verify_signature, 0,
 			      N_("[-s|--skip-sig] FILE SIGNATURE_FILE [PUBKEY_FILE]"),
 			      N_("Verify detached signature."),
 			      options);
-  cmd_trust = grub_register_extcmd ("trust", grub_cmd_trust, 0,
-				     N_("[-s|--skip-sig] PUBKEY_FILE"),
-				     N_("Add PUBKEY_FILE to trusted keys."),
-				     options);
   cmd_list = grub_register_command ("list_trusted", grub_cmd_list,
 				    0,
 				    N_("Show the list of trusted keys."));
-  cmd_distrust = grub_register_command ("distrust", grub_cmd_distrust,
-					N_("PUBKEY_ID"),
-					N_("Remove PUBKEY_ID from trusted keys."));
 
   grub_verifier_register (&grub_pubkey_verifier);
 }
@@ -1030,7 +919,5 @@ GRUB_MOD_FINI(pgp)
 {
   grub_verifier_unregister (&grub_pubkey_verifier);
   grub_unregister_extcmd (cmd);
-  grub_unregister_extcmd (cmd_trust);
   grub_unregister_command (cmd_list);
-  grub_unregister_command (cmd_distrust);
 }
