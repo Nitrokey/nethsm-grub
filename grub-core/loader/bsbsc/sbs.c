@@ -20,7 +20,6 @@
 #include <grub/types.h>
 #include <grub/mm.h>
 #include <grub/misc.h>
-#include <grub/extcmd.h>
 #include <grub/dl.h>
 #include <grub/file.h>
 #include <grub/crypto.h>
@@ -58,9 +57,9 @@ static struct reader_state_type state =
 static const gcry_md_spec_t *hasher = NULL;
 static void *hash_ctx = NULL;
 
-/* --- TODO: factor out from pgp.c? --- */
+/* Initialised by loading PGP, which the SBS module depends on */
 
-static struct grub_public_key *grub_pk_trusted = NULL;
+extern struct grub_public_key *grub_pk_trusted;
 
 static grub_ssize_t
 pseudo_read (struct grub_file *file, char *buf, grub_size_t len)
@@ -513,60 +512,18 @@ sbs_close (grub_file_t file __attribute__ ((unused)))
 	return GRUB_ERR_NONE;
 }
 
-/* Override CSL file operations */
-static grub_err_t
-sbs_init (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-		int argc __attribute__ ((unused)),
-		char **argv __attribute__ ((unused)))
+GRUB_MOD_INIT(sbs)
 {
-	grub_printf ("SBS - overriding CSL file ops...\n");
+	if (!grub_pk_trusted)
+		grub_fatal ("SBS: No trusted keys available, aborting\n");
+
 	csl_fs_ops.open  = sbs_open;
 	csl_fs_ops.read  = sbs_read;
 	csl_fs_ops.size  = sbs_size;
 	csl_fs_ops.close = sbs_close;
-
-	return GRUB_ERR_NONE;
-}
-
-static grub_extcmd_t cmd;
-
-GRUB_MOD_INIT(sbs)
-{
-	struct grub_module_header *mod_header;
-
-	/* only look for one key. */
-	// TODO: factor out from pgp.c?
-	FOR_MODULES (mod_header)
-	{
-		struct grub_file pseudo_file;
-		struct grub_public_key *pk = NULL;
-
-		grub_memset (&pseudo_file, 0, sizeof (pseudo_file));
-
-		/* not a pubkey, skip.  */
-		if (mod_header->type != OBJ_TYPE_PUBKEY)
-			continue;
-
-		pseudo_file.fs = &pseudo_fs;
-		pseudo_file.size = (mod_header->size - sizeof (struct grub_module_header));
-		pseudo_file.data = (char *) mod_header + sizeof (struct grub_module_header);
-
-		pk = grub_load_public_key (&pseudo_file);
-		if (!pk)
-			grub_fatal ("SBS - error loading initial key: %s\n", grub_errmsg);
-
-		grub_pk_trusted = pk;
-		break;
-	}
-	if (! grub_pk_trusted)
-		grub_fatal ("SBS - unable to init trusted pubkey\n");
-
-	cmd = grub_register_extcmd ("sbs_init", sbs_init, 0, 0,
-			"Initialize Signed Block Stream (SBS) processing.", 0);
 }
 
 GRUB_MOD_FINI(sbs)
 {
 	invalidate();
-	grub_unregister_extcmd (cmd);
 }
