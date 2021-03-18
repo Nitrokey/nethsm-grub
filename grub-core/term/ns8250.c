@@ -298,7 +298,7 @@ grub_ns8250_hw_get_port (const unsigned int unit)
 }
 
 char *
-grub_serial_ns8250_add_port (grub_port_t port)
+grub_serial_ns8250_add_port (grub_port_t port, struct grub_serial_config *config)
 {
   struct grub_serial_port *p;
   unsigned i;
@@ -307,6 +307,9 @@ grub_serial_ns8250_add_port (grub_port_t port)
       {
 	if (dead_ports & (1 << i))
 	  return NULL;
+	/* give the opportunity for SPCR to configure a default com port */
+	if (config)
+	  grub_serial_port_configure (&com_ports[i], config);
 	return com_names[i];
       }
 
@@ -328,22 +331,29 @@ grub_serial_ns8250_add_port (grub_port_t port)
       return NULL;
     }
   p->driver = &grub_ns8250_driver;
-  grub_serial_config_defaults (p);
   p->mmio = 0;
   p->port = port;
+  if (config)
+    grub_serial_port_configure (p, config);
+  else
+    grub_serial_config_defaults (p);
   grub_serial_register (p);  
 
   return p->name;
 }
 
 char *
-grub_serial_ns8250_add_mmio(grub_addr_t addr)
+grub_serial_ns8250_add_mmio(grub_addr_t addr, struct grub_serial_config *config)
 {
   struct grub_serial_port *p;
   unsigned i;
   for (i = 0; i < GRUB_SERIAL_PORT_NUM; i++)
-    if (com_ports[i].mmio &&  com_ports[i].mmio_base == addr)
-	return com_names[i];
+    if (com_ports[i].mmio && com_ports[i].mmio_base == addr)
+      {
+        if (config)
+          grub_serial_port_configure (&com_ports[i], config);
+        return com_names[i];
+      }
 
   p = grub_malloc (sizeof (*p));
   if (!p)
@@ -355,9 +365,12 @@ grub_serial_ns8250_add_mmio(grub_addr_t addr)
       return NULL;
     }
   p->driver = &grub_ns8250_driver;
-  grub_serial_config_defaults (p);
   p->mmio = 1;
   p->mmio_base = addr;
+  if (config)
+    grub_serial_port_configure (p, config);
+  else
+    grub_serial_config_defaults (p);
   grub_serial_register (p);
 
   return p->name;
