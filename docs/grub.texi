@@ -3868,7 +3868,8 @@ Commands usable anywhere in the menu and in the command-line.
 Initialize a serial device. @var{unit} is a number in the range 0-3
 specifying which serial port to use; default is 0, which corresponds to
 the port often called COM1. @var{port} is the I/O port where the UART
-is to be found; if specified it takes precedence over @var{unit}.
+is to be found; if specified it takes precedence over @var{unit}. It can
+also be ``mmio'' followed by the MMIO address of the port in hexadecimal.
 @var{speed} is the transmission speed; default is 9600. @var{word} and
 @var{stop} are the number of data bits and stop bits. Data bits must
 be in the range 5-8 and stop bits must be 1 or 2. Default is 8 data
