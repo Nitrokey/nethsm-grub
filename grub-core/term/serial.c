@@ -171,10 +171,20 @@ grub_serial_find (const char *name)
 							0, 16), NULL);
       if (!name)
 	return NULL;
-
       FOR_SERIAL_PORTS (port)
 	if (grub_strcmp (port->name, name) == 0)
 	  break;
+    }
+  if (!port && grub_strcmp (name, "auto") == 0)
+    {
+      /* Look for an SPCR if any. If not, default to com0 */
+      name = grub_ns8250_spcr_init();
+      if (!name)
+        name = "com0";
+
+      FOR_SERIAL_PORTS (port)
+        if (grub_strcmp (port->name, name) == 0)
+          break;
     }
 #endif
 
@@ -226,7 +236,7 @@ grub_cmd_serial (grub_extcmd_context_t ctxt, int argc, char **args)
     name = args[0];
 
   if (!name)
-    name = "com0";
+    name = "auto";
 
   port = grub_serial_find (name);
   if (!port)
