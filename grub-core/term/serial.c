@@ -164,6 +164,18 @@ grub_serial_find (const char *name)
 	if (grub_strcmp (port->name, name) == 0)
 	  break;
     }
+  if (!port && grub_memcmp (name, "mmio", sizeof ("mmio") - 1) == 0
+      && grub_isxdigit (name [sizeof ("mmio") - 1]))
+    {
+      name = grub_serial_ns8250_add_mmio (grub_strtoul (&name[sizeof ("mmio") - 1],
+							0, 16));
+      if (!name)
+	return NULL;
+
+      FOR_SERIAL_PORTS (port)
+	if (grub_strcmp (port->name, name) == 0)
+	  break;
+    }
 #endif
 
 #ifdef GRUB_MACHINE_IEEE1275
@@ -195,14 +207,18 @@ grub_cmd_serial (grub_extcmd_context_t ctxt, int argc, char **args)
   if (state[OPTION_UNIT].set)
     {
       grub_snprintf (pname, sizeof (pname), "com%ld",
-		     grub_strtoul (state[0].arg, 0, 0));
+		     grub_strtoul (state[OPTION_UNIT].arg, 0, 0));
       name = pname;
     }
 
   if (state[OPTION_PORT].set)
     {
-      grub_snprintf (pname, sizeof (pname), "port%lx",
-		     grub_strtoul (state[1].arg, 0, 0));
+      if (grub_memcmp (state[OPTION_PORT].arg, "mmio", 4) == 0)
+          grub_snprintf(pname, sizeof (pname), "%s", state[OPTION_PORT].arg);
+      else
+          grub_snprintf (pname, sizeof (pname), "port%lx",
+                         grub_strtoul (state[OPTION_PORT].arg, 0, 0));
+
       name = pname;
     }
 
