@@ -76,7 +76,7 @@ grub_xhci_pci_iter (grub_pci_device_t dev, grub_pci_id_t pciid,
       /* Check Serial Bus Release Number */
       addr = grub_pci_make_address (dev, GRUB_XHCI_PCI_SBRN_REG);
       release = grub_pci_read_byte (addr);
-      if (release != 0x30)
+      if (release != 0x30 && release != 0x31 &&release != 0x32)
 	{
 	  grub_dprintf ("xhci", "XHCI grub_xhci_pci_iter: Wrong SBRN: %0x\n",
 			release);
