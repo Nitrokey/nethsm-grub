@@ -1309,6 +1309,12 @@ module = {
 };
 
 module = {
+  name = nvme;
+  common = disk/nvme.c;
+  enable = pci;
+};
+
+module = {
   name = pata;
   common = disk/pata.c;
   enable = pci;
