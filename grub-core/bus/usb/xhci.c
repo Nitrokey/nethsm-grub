@@ -604,7 +604,12 @@ grub_xhci_alloc_inctx(struct grub_xhci *x, int maxepid,
 
   struct grub_xhci_slotctx *slot = (void*)&in[1 << x->flag64];
   slot->ctx[0]    |= maxepid << 27; /* context entries */
-  grub_dprintf("xhci", "%s: speed=%d root_port=%d\n", __func__, dev->speed, dev->root_port);
+
+  grub_dprintf("usb", "%s: speed=%d root_port=%d split_hubport=%d split_hubaddr=%d route=%x\n", 
+               __func__, dev->speed, dev->root_port, dev->split_hubport, 
+               dev->split_hubaddr, dev->route);
+
+  /* Set device speed */
   switch (dev->speed) {
     case GRUB_USB_SPEED_FULL:
       slot->ctx[0]    |= XHCI_USB_FULLSPEED << 20;
@@ -623,13 +628,46 @@ grub_xhci_alloc_inctx(struct grub_xhci *x, int maxepid,
       break;
   }
 
-  /* Route is greater zero on devices that are connected to a non root hub */
-  if (dev->route)
-    {
-      /* FIXME: Implement this code for non SuperSpeed hub devices */
+  /* Set routing string */
+  slot->ctx[0] |= dev->route;
+
+  /* Set root hub port number */
+  slot->ctx[1] |= (dev->root_port + 1) << 16;
+
+  if (dev->split_hubaddr && (dev->speed == GRUB_USB_SPEED_LOW ||
+                            dev->speed == GRUB_USB_SPEED_FULL)) {
+
+    grub_usb_device_t hubdev = grub_usb_get_dev(dev->split_hubaddr);
+
+    if (!hubdev || hubdev->descdev.class != GRUB_USB_CLASS_HUB) {
+      grub_dprintf("usb", "Invalid hub device at addr %d!\n", dev->split_hubaddr);
+      return NULL;
     }
-  slot->ctx[0]    |= dev->route;
-  slot->ctx[1]    |= (dev->root_port+1) << 16;
+
+    struct grub_xhci_priv *hub_priv = hubdev->xhci_priv;
+    if (!hub_priv) {
+      grub_dprintf("usb", "Hub has no xhci_priv!\n"); 
+      return NULL;
+    }
+
+    if (hubdev->speed == GRUB_USB_SPEED_HIGH) {
+      /* Direct connection to high-speed hub - set up TT */
+      grub_dprintf("usb", "Direct high-speed hub connection - configuring TT with "
+                   "hub slot %d port %d\n", hub_priv->slotid, dev->split_hubport);
+      slot->ctx[2] |= hub_priv->slotid;
+      slot->ctx[2] |= dev->split_hubport << 8;
+    }
+    else {
+      /* Hub is not high-speed, inherit TT settings from parent */
+      volatile struct grub_xhci_slotctx *hubslot;
+      grub_dprintf("usb", "Non high-speed hub - inheriting TT settings from parent\n");
+      hubslot = grub_dma_phys2virt(x->devs[hub_priv->slotid].ptr_low, x->devs_dma);
+      slot->ctx[2] = hubslot->ctx[2];
+    }
+  }
+
+  grub_dprintf("usb", "Slot context: ctx[0]=0x%08x ctx[1]=0x%08x ctx[2]=0x%08x\n",
+               slot->ctx[0], slot->ctx[1], slot->ctx[2]);
 
   grub_arch_sync_dma_caches(in, size);
 
@@ -1461,6 +1499,7 @@ grub_xhci_update_hub_portcount (struct grub_xhci *x,
   struct grub_pci_dma_chunk *in_dma;
   volatile struct grub_xhci_slotctx *hdslot;
   grub_uint32_t epid = 0;
+  grub_dprintf("xhci", "%s: slotid=%d\n", __func__, slotid);
 
   if (!transfer || !transfer->dev || !transfer->dev->nports)
     return GRUB_USB_ERR_NONE;
@@ -1573,7 +1612,7 @@ grub_xhci_prepare_endpoint (struct grub_xhci *x,
       epid = (endpoint & 0x0f) * 2;
       epid += (dir == GRUB_USB_TRANSFER_TYPE_IN) ? 1 : 0;
     }
-  grub_dprintf("xhci", "%s: epid %d\n", __func__, epid);
+  grub_dprintf("usb", "%s: epid %d\n", __func__, epid);
 
   /* Test if already prepared */
   if (priv->slotid > 0 && priv->enpoint_trbs[epid] != NULL)
@@ -1618,19 +1657,19 @@ grub_xhci_prepare_endpoint (struct grub_xhci *x,
   ep->deq_low  |= 1;	 /* dcs */
   ep->length   = maxpaket;
 
-  grub_dprintf("xhci", "%s: ring %p, epid %d, max %d\n", __func__,
+  grub_dprintf("usb", "%s: ring %p, epid %d, max %d\n", __func__,
 	       reqs, epid, maxpaket);
   if (epid == 1 || priv->slotid == 0) {
     /* Enable slot. */
     int slotid = xhci_cmd_enable_slot(x);
     if (slotid < 0)
       {
-	grub_dprintf("xhci", "%s: enable slot: failed\n", __func__);
+	grub_dprintf("usb", "%s: enable slot: failed\n", __func__);
 	grub_dma_free(reqs_dma);
 	grub_dma_free(in_dma);
 	return GRUB_USB_ERR_BADDEVICE;
       }
-    grub_dprintf("xhci", "%s: get slot %d assigned\n", __func__, slotid);
+    grub_dprintf("usb", "%s: get slot %d assigned\n", __func__, slotid);
 
     grub_uint32_t size = (sizeof(struct grub_xhci_slotctx) * GRUB_XHCI_MAX_ENDPOINTS) << x->flag64;
 
@@ -1639,14 +1678,14 @@ grub_xhci_prepare_endpoint (struct grub_xhci *x,
 					    x->pagesize);
     if (!priv->slotctx_dma)
       {
-	grub_dprintf("xhci", "%s: grub_memalign_dma32 failed\n", __func__);
+	grub_dprintf("usb", "%s: grub_memalign_dma32 failed\n", __func__);
 	grub_dma_free(reqs_dma);
 	grub_dma_free(in_dma);
 	return GRUB_USB_ERR_INTERNAL;
       }
     slotctx = grub_dma_get_virt(priv->slotctx_dma);
 
-    grub_dprintf("xhci", "%s: enable slot: got slotid %d\n", __func__, slotid);
+    grub_dprintf("usb", "%s: enable slot: got slotid %d\n", __func__, slotid);
     grub_memset((void *)slotctx, 0, size);
     grub_arch_sync_dma_caches(slotctx, size);
 
@@ -1658,10 +1697,10 @@ grub_xhci_prepare_endpoint (struct grub_xhci *x,
     int cc = xhci_cmd_address_device(x, slotid, in_dma);
     if (cc != CC_SUCCESS)
       {
-	grub_dprintf("xhci","%s: address device: failed (cc %d)\n", __func__, cc);
+	grub_dprintf("usb","%s: address device: failed (cc %d)\n", __func__, cc);
 	cc = xhci_cmd_disable_slot(x, slotid);
 	if (cc != CC_SUCCESS) {
-	    grub_dprintf("xhci", "%s: disable failed (cc %d)\n", __func__, cc);
+	    grub_dprintf("usb", "%s: disable failed (cc %d)\n", __func__, cc);
 	} else {
 	  x->devs[slotid].ptr_low = 0;
 	  x->devs[slotid].ptr_high = 0;
@@ -1683,7 +1722,7 @@ grub_xhci_prepare_endpoint (struct grub_xhci *x,
 	int cc = xhci_cmd_configure_endpoint(x, priv->slotid, in_dma);
 	if (cc != CC_SUCCESS)
 	  {
-	    grub_dprintf("xhci", "%s: configure endpoint: failed (cc %d)\n",
+	    grub_dprintf("usb", "%s: configure endpoint: failed (cc %d)\n",
 			 __func__, cc);
 	    grub_dma_free(reqs_dma);
 	    grub_dma_free(in_dma);
@@ -1693,7 +1732,7 @@ grub_xhci_prepare_endpoint (struct grub_xhci *x,
       priv->enpoint_trbs_dma[epid] = reqs_dma;
     }
 
-  grub_dprintf("xhci", "%s: done\n", __func__);
+  grub_dprintf("usb", "%s: done\n", __func__);
   grub_dma_free(in_dma);
 
   return GRUB_USB_ERR_NONE;
@@ -1883,13 +1922,13 @@ grub_xhci_setup_transfer (grub_usb_controller_t dev,
         }
     }
   if (epid == 1 &&
-      transfer->dev->descdev.class == 9 &&
+      transfer->dev->descdev.class == GRUB_USB_CLASS_HUB &&
       transfer->dev->nports > 0)
     {
       err = grub_xhci_update_hub_portcount(x, transfer, priv->slotid);
       if (err != GRUB_USB_ERR_NONE)
         {
-          grub_dprintf("xhci", "%s: Updating max paket size failed\n", __func__);
+          grub_dprintf("xhci", "%s: Updating hub portcount failed\n", __func__);
           return err;
         }
     }
@@ -2247,10 +2286,10 @@ grub_xhci_detect_dev (grub_usb_controller_t dev, int port, int *changed)
 {
   struct grub_xhci *x = (struct grub_xhci *) dev->data;
   grub_uint32_t portsc, speed;
-
+  
   *changed = 0;
   grub_dprintf("xhci", "%s: dev=%p USB%d_%d port %d\n", __func__, dev,
-	       x->psids[port-1].major, x->psids[port-1].minor, port);
+	       x->psids[port].major, x->psids[port].minor, port);
 
   /* On shutdown advertise all ports as disconnected. This will trigger
    * a gracefull detatch. */
@@ -2268,11 +2307,11 @@ grub_xhci_detect_dev (grub_usb_controller_t dev, int port, int *changed)
   speed = xhci_get_field(portsc, XHCI_PORTSC_SPEED);
   grub_uint8_t pls = xhci_get_field(portsc, XHCI_PORTSC_PLS);
 
-  grub_dprintf("xhci", "grub_xhci_portstatus port #%d: 0x%08x,%s%s pls %d\n",
+  grub_dprintf("xhci", "grub_xhci_portstatus port #%d: 0x%08x,%s%s pls %d speed %d\n",
 	       port, portsc,
 	       (portsc & GRUB_XHCI_PORTSC_PP)  ? " powered," : "",
 	       (portsc & GRUB_XHCI_PORTSC_PED) ? " enabled," : "",
-	       pls);
+	       pls, speed);
 
   /* Connect Status Change bit - it detects change of connection */
   if (portsc & GRUB_XHCI_PORTSC_CSC)
@@ -2285,13 +2324,18 @@ grub_xhci_detect_dev (grub_usb_controller_t dev, int port, int *changed)
   if (!(portsc & GRUB_XHCI_PORTSC_CCS))
     return GRUB_USB_SPEED_NONE;
 
-  for (grub_uint8_t i = 0; i < 16 && x->psids[port-1].psids[i].id > 0; i++)
+  if (port == 4 || port == 12 && speed < XHCI_USB_HIGHSPEED) { // inital hub speed detection on Z790 is too low
+    grub_dprintf("xhci", "%s: setting internal hub speed to high\n", __func__);
+    return GRUB_USB_SPEED_HIGH;
+  }
+
+  for (grub_uint8_t i = 0; i < 16 && x->psids[port].psids[i].id > 0; i++)
     {
-      if (x->psids[port-1].psids[i].id == speed)
+      if (x->psids[port].psids[i].id == speed)
         {
 	  grub_dprintf("xhci", "%s: grub_usb_speed = %d\n", __func__,
-		       x->psids[port-1].psids[i].grub_usb_speed );
-	  return x->psids[port-1].psids[i].grub_usb_speed;
+		       x->psids[port].psids[i].grub_usb_speed );
+	  return x->psids[port].psids[i].grub_usb_speed;
 	}
     }
 

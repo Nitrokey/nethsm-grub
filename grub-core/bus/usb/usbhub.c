@@ -59,6 +59,9 @@ grub_usb_hub_add_dev (grub_usb_controller_t controller,
 
   grub_boot_time ("Attaching USB device");
 
+  grub_dprintf ("usb", "%s: speed=%d split_hubport=%d split_hubaddr=%d root_portno=%d route=%x\n",
+		__func__, speed, split_hubport, split_hubaddr, root_portno, route);
+
   dev = grub_zalloc (sizeof (struct grub_usb_device));
   if (! dev)
     return NULL;
@@ -153,6 +156,9 @@ grub_usb_add_hub (grub_usb_device_t dev)
   grub_usb_err_t err;
   grub_uint16_t req;
   int i;
+
+  grub_dprintf ("usb", "%s: dev=%p speed=%d\n", __func__, dev, dev->speed);
+
 
   req = (dev->speed == GRUB_USB_SPEED_SUPER) ? GRUB_USB_DESCRIPTOR_SS_HUB :
     GRUB_USB_DESCRIPTOR_HUB;
@@ -574,8 +580,8 @@ poll_nonroot_hub (grub_usb_device_t dev)
 				  GRUB_USB_REQ_GET_STATUS,
 				  0, i, sizeof (status), (char *) &status);
 
-      grub_dprintf ("usb", "dev = %p, i = %d, status = %08x\n",
-                   dev, i, status);
+      grub_dprintf ("usb", "%s: hub-dev = %p, hub-speed = %d, i = %d, status = %08x\n",
+                   __func__, dev, dev->speed, i, status);
 
       if (err)
 	continue;
@@ -662,6 +668,9 @@ poll_nonroot_hub (grub_usb_device_t dev)
 		  else
 		    speed = GRUB_USB_SPEED_FULL;
 		}
+
+	      grub_dprintf("usb", "Hub speed=%d, detected device speed=%d\n", 
+                dev->speed, speed);
 
 	      /* Wait a recovery time after reset, spec. says 10ms */
 	      grub_millisleep (10);
@@ -805,4 +814,10 @@ grub_usb_iterate (grub_usb_iterate_hook_t hook, void *hook_data)
     }
 
   return 0;
+}
+
+grub_usb_device_t
+grub_usb_get_dev (int addr)
+{
+  return grub_usb_devs[addr];
 }
