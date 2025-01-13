@@ -2250,7 +2250,7 @@ grub_xhci_detect_dev (grub_usb_controller_t dev, int port, int *changed)
 
   *changed = 0;
   grub_dprintf("xhci", "%s: dev=%p USB%d_%d port %d\n", __func__, dev,
-	       x->psids[port-1].major, x->psids[port-1].minor, port);
+	       x->psids[port].major, x->psids[port].minor, port);
 
   /* On shutdown advertise all ports as disconnected. This will trigger
    * a gracefull detatch. */
@@ -2285,13 +2285,13 @@ grub_xhci_detect_dev (grub_usb_controller_t dev, int port, int *changed)
   if (!(portsc & GRUB_XHCI_PORTSC_CCS))
     return GRUB_USB_SPEED_NONE;
 
-  for (grub_uint8_t i = 0; i < 16 && x->psids[port-1].psids[i].id > 0; i++)
+  for (grub_uint8_t i = 0; i < 16 && x->psids[port].psids[i].id > 0; i++)
     {
-      if (x->psids[port-1].psids[i].id == speed)
+      if (x->psids[port].psids[i].id == speed)
         {
 	  grub_dprintf("xhci", "%s: grub_usb_speed = %d\n", __func__,
-		       x->psids[port-1].psids[i].grub_usb_speed );
-	  return x->psids[port-1].psids[i].grub_usb_speed;
+		       x->psids[port].psids[i].grub_usb_speed );
+	  return x->psids[port].psids[i].grub_usb_speed;
 	}
     }
 
