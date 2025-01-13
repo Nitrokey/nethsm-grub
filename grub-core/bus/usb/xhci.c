@@ -2285,6 +2285,11 @@ grub_xhci_detect_dev (grub_usb_controller_t dev, int port, int *changed)
   if (!(portsc & GRUB_XHCI_PORTSC_CCS))
     return GRUB_USB_SPEED_NONE;
 
+  if (port == 4 || port == 12 && speed < XHCI_USB_HIGHSPEED) { // inital hub speed detection on Z790 is too low
+    grub_dprintf("xhci", "%s: setting internal hub speed to high\n", __func__);
+    return GRUB_USB_SPEED_HIGH;
+  }
+
   for (grub_uint8_t i = 0; i < 16 && x->psids[port].psids[i].id > 0; i++)
     {
       if (x->psids[port].psids[i].id == speed)
