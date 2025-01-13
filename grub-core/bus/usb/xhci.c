@@ -623,13 +623,46 @@ grub_xhci_alloc_inctx(struct grub_xhci *x, int maxepid,
       break;
   }
 
-  /* Route is greater zero on devices that are connected to a non root hub */
-  if (dev->route)
-    {
-      /* FIXME: Implement this code for non SuperSpeed hub devices */
+  /* Set routing string */
+  slot->ctx[0] |= dev->route;
+
+  /* Set root hub port number */
+  slot->ctx[1] |= (dev->root_port + 1) << 16;
+
+  if (dev->split_hubaddr && (dev->speed == GRUB_USB_SPEED_LOW ||
+                            dev->speed == GRUB_USB_SPEED_FULL)) {
+
+    grub_usb_device_t hubdev = grub_usb_get_dev(dev->split_hubaddr);
+
+    if (!hubdev || hubdev->descdev.class != GRUB_USB_CLASS_HUB) {
+      grub_dprintf("xhci", "Invalid hub device at addr %d!\n", dev->split_hubaddr);
+      return NULL;
     }
-  slot->ctx[0]    |= dev->route;
-  slot->ctx[1]    |= (dev->root_port+1) << 16;
+
+    struct grub_xhci_priv *hub_priv = hubdev->xhci_priv;
+    if (!hub_priv) {
+      grub_dprintf("xhci", "Hub has no xhci_priv!\n"); 
+      return NULL;
+    }
+
+    if (hubdev->speed == GRUB_USB_SPEED_HIGH) {
+      /* Direct connection to high-speed hub - set up TT */
+      grub_dprintf("xhci", "Direct high-speed hub connection - configuring TT with "
+                   "hub slot %d port %d\n", hub_priv->slotid, dev->split_hubport);
+      slot->ctx[2] |= hub_priv->slotid;
+      slot->ctx[2] |= dev->split_hubport << 8;
+    }
+    else {
+      /* Hub is not high-speed, inherit TT settings from parent */
+      volatile struct grub_xhci_slotctx *hubslot;
+      grub_dprintf("xhci", "Non high-speed hub - inheriting TT settings from parent\n");
+      hubslot = grub_dma_phys2virt(x->devs[hub_priv->slotid].ptr_low, x->devs_dma);
+      slot->ctx[2] = hubslot->ctx[2];
+    }
+  }
+
+  grub_dprintf("xhci", "Slot context: ctx[0]=0x%08x ctx[1]=0x%08x ctx[2]=0x%08x\n",
+               slot->ctx[0], slot->ctx[1], slot->ctx[2]);
 
   grub_arch_sync_dma_caches(in, size);
 

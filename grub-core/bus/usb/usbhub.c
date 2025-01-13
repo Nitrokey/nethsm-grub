@@ -806,3 +806,9 @@ grub_usb_iterate (grub_usb_iterate_hook_t hook, void *hook_data)
 
   return 0;
 }
+
+grub_usb_device_t
+grub_usb_get_dev (int addr)
+{
+  return grub_usb_devs[addr];
+}

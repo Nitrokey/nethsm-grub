@@ -62,6 +62,8 @@ typedef int (*grub_usb_controller_iterate_hook_t) (grub_usb_controller_t dev,
 /* Call HOOK with each device, until HOOK returns non-zero.  */
 int grub_usb_iterate (grub_usb_iterate_hook_t hook, void *hook_data);
 
+grub_usb_device_t grub_usb_get_dev (int addr);
+
 grub_usb_err_t grub_usb_device_initialize (grub_usb_device_t dev);
 
 grub_usb_err_t grub_usb_get_descriptor (grub_usb_device_t dev,
